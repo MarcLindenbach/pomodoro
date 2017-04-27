@@ -1,71 +1,89 @@
 import argparse
-import pickle
 import os
 import time
 
 
-file_name = os.path.expanduser('~/.pomodoro.state')
 focus_duration = 25
 break_duration = 5
 total_duration = focus_duration + break_duration
 
 
-def reset_file():
-    data = {
-        'start': time.time()
-    }
-    f = open(file_name, 'w')
-    pickle.dump(data, f)
-    f.close()
+def reset():
+    start = time.time()
+    os.popen('tmux setb -b pomodoro-timer {}'.format(start))
+    set_last_messaged_displayed('focus')
+
+
+def get_start_time():
+    start = os.popen('tmux showb -b pomodoro-timer').read()
+    if start == '':
+        reset()
+        return get_start_time()
+    return float(start)
+
+
+def get_last_messaged_displayed():
+    last_message = os.popen('tmux showb -b pomodoro-last-message').read()
+    return last_message
+
+
+def set_last_messaged_displayed(message):
+    os.popen('tmux setb -b pomodoro-last-message {}'.format(message))
+
+
+def display_popup_message(message):
+    os.system('tmux splitw -t 0 -l 9 "cowsay {} && read"'.format(message))
 
 
 def display_ticker():
-    try:    
-        f = open(file_name, 'rb')
-        data = pickle.load(f)
-        f.close()
-    except:
-        reset_file()
-
-    elapsed = int(time.time() - data['start'])
-    minutes = int(elapsed / 60) % total_duration
-
-    if elapsed % 2:
-        leader = '>'
+    start = get_start_time()
+    sec_elapsed = int(time.time() - start)
+    min_elapsed = int(sec_elapsed / 60) % total_duration
+    sec_remaining = 60 - (sec_elapsed % 60)
+    if min_elapsed < focus_duration:
+        min_remaining = focus_duration - min_elapsed - 1
     else:
-        leader = ' '
+        min_remaining = total_duration - min_elapsed - 1
+    if sec_remaining == 60:
+        min_remaining += 1
+        sec_remaining = 0
 
-    progress_bar = ('[' + 
-                    '=' * min(minutes, focus_duration) +
-                    (leader if minutes < focus_duration else '') +
-                    ' ' * max(focus_duration - minutes - 1, 0) +
-                    '|' +
-                    '=' * max(minutes - focus_duration, 0) +
-                    (leader if minutes >= focus_duration else '') +
-                    ' ' * min(total_duration - minutes - 1, break_duration) +
-                    ']')
+    cycles = int(sec_elapsed / 60 / total_duration)
+    leader = '>' if sec_elapsed % 2 else ' '
 
-    state = 'Focus' if minutes < focus_duration else 'Break'
-    min_remaining = (focus_duration - minutes if minutes < focus_duration else
-    total_duration - minutes) - 1
-    sec_remaining = 60 - (int(elapsed) % 60)
-    cycles = int(elapsed / 60 / total_duration)
+    progress_bar = (
+        '[' +
+        '=' * min(min_elapsed, focus_duration) +
+        (leader if min_elapsed < focus_duration else '') +
+        ' ' * max(focus_duration - min_elapsed - 1, 0) +
+        '|' +
+        '=' * max(min_elapsed - focus_duration, 0) +
+        (leader if min_elapsed >= focus_duration else '') +
+        ' ' * min(total_duration - min_elapsed - 1, break_duration) +
+        ']'
+    )
 
-    if (minutes == focus_duration) and (sec_remaining > 58):
-        os.system('zenity --info --text="Time for a break!" --title="pomodoro"')
+    if (min_elapsed == focus_duration and
+            get_last_messaged_displayed() != 'break'):
+        display_popup_message('Time for a break!')
+        set_last_messaged_displayed('break')
+    if (min_elapsed == 0 and
+            get_last_messaged_displayed() != 'focus'):
+        set_last_messaged_displayed('focus')
+        display_popup_message('Time to focus!')
 
     print('{} {:02d}:{:02d} {} '.format(
-        progress_bar, 
+        progress_bar,
         min_remaining,
         sec_remaining,
         '|' * cycles))
 
-  
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-r', action='store_true')
 args = parser.parse_args()
 
 if args.r:
-    reset_file()
+    reset()
 else:
     display_ticker()
